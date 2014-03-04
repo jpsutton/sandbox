@@ -62,28 +62,38 @@ process_args $*
 # trap the SIGINT signal (most often a "ctrl+c" keystroke) and cleanup before exiting
 trap control_c SIGINT
 
-ssh -NTf -M -S "$SSH_SOCKET" -o ServerAliveInterval=120 -w 0:0 -D 7777 -i "$PRIV_KEY" root@"$SERVER"
+ssh -NTf -M -y -S "$SSH_SOCKET" -o ServerAliveInterval=120 -w any:any -D 7777 -L13389:localhost:3389 -i "$PRIV_KEY" root@"$SERVER"
 [ $? -eq 0 ] || error_exit "could not connect to the SSH server '$SERVER'" -1
 echo "INFO: SSH connection established (control socket at '$SSH_SOCKET')"
+
+LOCAL_TUN_DEV=$(ifconfig -a | grep -Eo '^tun[0-9]+' | sort -n | tail -1)
+REMOTE_TUN_DEV=$(server_cmd "ifconfig -a | grep -Eo '^tun[0-9]+' | sort -n | tail -1")
+echo "INFO: Local tunneling device is $LOCAL_TUN_DEV"
+echo "INFO: Remote tunneling device is $REMOTE_TUN_DEV"
 
 server_cmd "echo 1 > /proc/sys/net/ipv4/ip_forward"
 [ $? -eq 0 ] || error_exit "could not enable IP forwarding on '$SERVER'" 1
 echo "INFO: Turned on IP forwarding on the server"
 
-server_cmd "ifconfig tun0 10.0.0.100 pointopoint 10.0.0.200"
+LOCAL_TUN_IP="169.254.1"$(echo $REMOTE_TUN_DEV | sed 's/^tun//')".10"$(echo $LOCAL_TUN_DEV | sed 's/^tun//')
+REMOTE_TUN_IP="169.254."$(echo $REMOTE_TUN_DEV | sed 's/^tun//')".10"$(echo $REMOTE_TUN_DEV | sed 's/^tun//')
+#REMOTE_TUN_IP="169.254.${REMOTE_TUN_DEV}.10${REMOTE_TUN_DEV}"
+
+server_cmd "ifconfig ${REMOTE_TUN_DEV} ${REMOTE_TUN_IP} pointopoint ${LOCAL_TUN_IP}"
 [ $? -eq 0 ] || error_exit "could not initialize the tunnel interface on '$SERVER'" 2
 echo "INFO: Initialized the point-to-point tunnel interface on the server"
 
 server_iface=$(server_cmd "route -n | grep $NETWORK" | awk '{ print $8 }')
-server_cmd "iptables -t nat -A POSTROUTING -s 10.0.0.0/24 -o $server_iface -j MASQUERADE"
+server_cmd "iptables -t nat -A POSTROUTING -s 169.254.0.0/16 -o $server_iface -j MASQUERADE"
 [ $? -eq 0 ] || error_exit "could not enable IP masquerading on '$SERVER'" 3
 echo "INFO: Added an IP masquerading firewall rule on the server"
 
-ifconfig tun0 10.0.0.200 pointopoint 10.0.0.100
+ifconfig "$LOCAL_TUN_DEV" "$LOCAL_TUN_IP" pointopoint "$REMOTE_TUN_IP"
 [ $? -eq 0 ] || error_exit "could not initialize tunnel interface on local system" 4
 echo "INFO: Initialized the point-to-point tunnel interface on the client"
 
-route add -net "$NETWORK" netmask "$NETMASK" gw 10.0.0.100
+route add -net "$NETWORK" netmask "$NETMASK" gw "$REMOTE_TUN_IP"
+
 [ $? -eq 0 ] || error_exit "could not add network route on local system" 5
 echo "INFO: Added a route for the VPN network on the client"
 
