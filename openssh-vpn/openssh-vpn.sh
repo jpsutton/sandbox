@@ -1,12 +1,38 @@
 #!/bin/bash
 
-SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
-SSH_SOCKET=$(mktemp -u -p "$SCRIPT_DIR")
-
 if [ "$USER" != "root" ]; then
-  echo "ERROR: this script must be run as the root user." 1>&2
+  echo "ERROR: this script must be run as the root user." >&2
   exit -1
 fi
+
+SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
+ENABLE_SOCKS_PROXY=0
+SOCKS_PROXY_PORT=7777
+ENABLE_KEEPALIVE=1
+KEEPALIVE_INTERVAL=120
+ENABLE_RDP_FORWARDING=0
+RDP_LOCAL_PORT="13389"
+RDP_REMOTE_HOST="localhost"
+RDP_REMOTE_PORT="3389"
+TMP_DIR="$SCRIPT_DIR"
+
+if [ -r /etc/openssh-vpn.cfg ]; then
+  echo "INFO: Reading system-wide configuration..."
+  source /etc/openssh-vpn.cfg
+fi
+
+if [ -r ~/.openssh-vpn ]; then
+  echo "INFO: Reading user configuration..."
+  source ~/.openssh-vpn
+elif [ "$SUDO_USER" != "" ]; then
+  if [ -r "/home/$SUDO_USER/.openssh-vpn" ]; then
+    echo "INFO: Reading sudo-user configuration..."
+    source /home/$SUDO_USER/.openssh-vpn
+  fi
+fi
+
+SSH_SOCKET=$(mktemp -u -p "$TMP_DIR")
+SSH_ARG_LIST="-NTf -M -y -S "$SSH_SOCKET" -w any:any"
 
 function error_exit {
   echo "ERROR: $1" >&2
@@ -42,12 +68,12 @@ function control_c {
   exit 0
 }
 
-function process_args {
+function process_script_args {
   options=':s:n:m:k'
   
   while getopts "$options" option; do
     case "$option" in
-      s ) SERVER="$OPTARG" && [ -n "$PRIV_KEY" ] || PRIV_KEY="${SCRIPT_DIR}/${SERVER}.privkey" ;;
+      s ) SERVER="$OPTARG" ;;
       n ) NETWORK="$OPTARG" ;;
       m ) NETMASK="$OPTARG" ;;
       k ) PRIV_KEY="$OPTARG" ;;
@@ -57,19 +83,37 @@ function process_args {
     esac
   done
   
-  #shift $(($OPTIND - 1))
-  
   [ -n "$SERVER"  ] || error_exit "You must specifiy a server with the -s argument." -5
   [ -n "$NETWORK" ] || error_exit "You must specifiy a network with the -n argument." -6
   [ -n "$NETMASK" ] || error_exit "You must specifiy a netmask with the -m argument." -7
 }
 
-process_args $*
+function build_ssh_arg_list {
+  if [ $ENABLE_SOCKS_PROXY -ne 0 ]; then
+    SSH_ARG_LIST="$SSH_ARG_LIST -D $SOCKS_PROXY_PORT"
+  fi
+
+  if [ $ENABLE_KEEPALIVE -ne 0 ]; then
+    SSH_ARG_LIST="$SSH_ARG_LIST -o ServerAliveInterval=$KEEPALIVE_INTERVAL"
+  fi
+
+  if [ $ENABLE_RDP_FORWARDING -ne 0 ]; then
+    SSH_ARG_LIST="$SSH_ARG_LIST -L${RDP_LOCAL_PORT}:${RDP_REMOTE_HOST}:${RDP_REMOTE_PORT}"
+  fi
+
+  if [ "$PRIV_KEY" != "" ]; then
+    SSH_ARG_LIST="$SSH_ARG_LIST -i $PRIV_KEY"
+  fi
+}
+
+process_script_args $*
+build_ssh_arg_list
 
 # trap the SIGINT signal (most often a "ctrl+c" keystroke) and cleanup before exiting
 trap control_c SIGINT
 
-ssh -NTf -M -y -S "$SSH_SOCKET" -o ServerAliveInterval=120 -w any:any -D 7777 -L13389:localhost:3389 -i "$PRIV_KEY" root@"$SERVER"
+# Establish the primary SSH connection
+ssh $SSH_ARG_LIST root@"$SERVER"
 [ $? -eq 0 ] || error_exit "could not connect to the SSH server '${SERVER}'" -1
 echo "INFO: SSH connection established (control socket at '${SSH_SOCKET}')"
 
