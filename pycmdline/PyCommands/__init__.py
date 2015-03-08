@@ -50,12 +50,40 @@ class BuiltinCommand:
     return options
 
   @staticmethod
+  def completeFileFolder (filter, text, line, begidx, endidx):
+    options = list()
+    curpath = os.getcwd()
+    prefix = " ".join(line.split(" ")[1:])
+    other = text
+
+    if prefix.find("/") != -1:
+      parts = prefix.split("/")
+      curpath = os.path.join(*([curpath] + parts[0:-1]))
+      other = parts[-1]
+
+    for name in os.listdir(curpath):
+      if other and not name.startswith(other): continue
+      fullpath = os.path.join(curpath, name)
+
+      if os.path.isdir(fullpath):
+        if filter in ("folder", None):
+          options.append("%s/" % name)
+      elif os.path.isfile(fullpath):
+        if filter in ("file", None):
+          options.append(name)
+
+    return options
+
+  @staticmethod
   def run (*args):
     pass
 
 class OSCommand (BuiltinCommand):
   def __repr__(self):
     return "<OSCommand '%s'>" % self.command
+
+  def complete(self, text, line, begidx, endidx):
+    return BuiltinCommand.completeFileFolder(None, text, line, begidx, endidx)
 
   def __init__(self, command, executable):
     self.command = command

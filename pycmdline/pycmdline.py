@@ -33,9 +33,6 @@ class Util:
     
 class PyCmdLine (cmd.Cmd):
   prompt = ""
-  command = None
-  args = None
-  line = None
 
   # Constructor
   def __init__(self, completekey='tab', stdin=None, stdout=None):
