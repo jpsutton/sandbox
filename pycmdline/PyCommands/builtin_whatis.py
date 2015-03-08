@@ -18,7 +18,7 @@ class builtin_whatis (BuiltinCommand):
   @staticmethod
   def run (strval=""):
     if strval in builtin_commands:
-      exec("print(%s)" % repr(builtin_commands[strval]))
+      exec("print(builtin_commands['%s'].__repr__())" % strval)
     elif strval:
       exec("print(repr(%s))" % strval)
     else:

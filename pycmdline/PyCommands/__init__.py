@@ -7,8 +7,9 @@ builtin_commands = dict()
 class BuiltinCommand:
   command = None
 
-  def __repr__ (self):
-    return "<BuiltinCommand '%s'>" % self.command
+  @classmethod
+  def __repr__ (cls):
+    return "<BuiltinCommand '%s'>" % cls.command
 
   @staticmethod
   def complete (text, line, begidx, endidx):

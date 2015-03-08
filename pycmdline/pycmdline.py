@@ -169,8 +169,8 @@ class PyCmdLine (cmd.Cmd):
   def do_pycmd (self, *args):
     try:
       exec(self.line.replace("pycmd ", "", 1))
-    except NameError:
-      sys.stderr.write("%s: command not found\n" % self.command)
+    #except NameError:
+      #sys.stderr.write("%s: command not found\n" % self.command)
     except:
       Util.logTraceback()
 
