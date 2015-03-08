@@ -1,8 +1,37 @@
 #!/usr/bin/env python
 
 import os
+import sys
+import subprocess
+import platform
+import appGlobals
 
-builtin_commands = dict()
+def addBuiltin (ClassOrInstance):
+  appGlobals.BUILTINS[ClassOrInstance.command] = ClassOrInstance
+
+def init_builtins ():
+  if len(appGlobals.BUILTINS):
+    return
+
+  for name in os.listdir(os.path.dirname(os.path.realpath(__file__))):
+    if name.endswith(".py"):
+      __import__("PyCommands.%s" % name.replace(".py", ""))
+
+  print("Building OS command list...")
+  delim = ';' if platform.system() == "Windows" else ':'
+  pathDirs = os.environ['PATH'].split(delim)
+
+  for directory in pathDirs:
+    for name in os.listdir(directory):
+      fullpath = os.path.join(directory, name)
+
+      if os.path.isfile(fullpath):
+        if platform.system() == "Windows" and name.lower().endswith(".exe"):
+          name = name.lower().replace(".exe", "")
+        elif not os.access(fullpath, os.X_OK):
+          continue
+
+        OSCommand(name, fullpath)
 
 class BuiltinCommand:
   command = None
@@ -15,7 +44,7 @@ class BuiltinCommand:
   def complete (text, line, begidx, endidx):
     options = list()
 
-    for name in list(builtin_commands.copy().keys()):
+    for name in list(appGlobals.BUILTINS.copy().keys()):
       if not text or name.startswith(text):
         options.append(name)
     return options
@@ -24,10 +53,20 @@ class BuiltinCommand:
   def run (*args):
     pass
 
-def addBuiltin (cls):
-  builtin_commands[cls.command] = cls
+class OSCommand (BuiltinCommand):
+  def __repr__(self):
+    return "<OSCommand '%s'>" % self.command
 
-for name in os.listdir(os.path.dirname(os.path.realpath(__file__))):
-  if name.endswith(".py"):
-    __import__("PyCommands.%s" % name.replace(".py", ""))
+  def __init__(self, command, executable):
+    self.command = command
+    self.executable = executable
+    if command not in appGlobals.BUILTINS or appGlobals.BUILTINS[command].__class__ == self.__class__:
+      addBuiltin(self)
+    else:
+      sys.stderr.write("WARN: overriding OS command '%s' with built-in implementation\n" % command)
 
+  def run (self, *args):
+    cmd = [self.command] + list(args)
+    subprocess.call(cmd)
+
+init_builtins()

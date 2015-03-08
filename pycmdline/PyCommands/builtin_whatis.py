@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os, sys
+import appGlobals
 from PyCommands import *
 
 class builtin_whatis (BuiltinCommand):
@@ -17,8 +18,8 @@ class builtin_whatis (BuiltinCommand):
 
   @staticmethod
   def run (strval=""):
-    if strval in builtin_commands:
-      exec("print(builtin_commands['%s'].__repr__())" % strval)
+    if strval in appGlobals.BUILTINS:
+      exec("print(appGlobals.BUILTINS['%s'].__repr__())" % strval)
     elif strval:
       exec("print(repr(%s))" % strval)
     else:
