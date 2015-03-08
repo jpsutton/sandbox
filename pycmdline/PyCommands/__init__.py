@@ -53,10 +53,13 @@ class BuiltinCommand:
   def completeFileFolder (filter, text, line, begidx, endidx):
     options = list()
     curpath = os.getcwd()
-    prefix = " ".join(line.split(" ")[1:])
+    prefix = line.split(" ")[-1]
     other = text
 
     if prefix.find("/") != -1:
+      if prefix.startswith("/"):
+        curpath = "/"
+
       parts = prefix.split("/")
       curpath = os.path.join(*([curpath] + parts[0:-1]))
       other = parts[-1]
@@ -94,7 +97,7 @@ class OSCommand (BuiltinCommand):
       sys.stderr.write("WARN: overriding OS command '%s' with built-in implementation\n" % command)
 
   def run (self, *args):
-    cmd = [self.command] + list(args)
+    cmd = [self.executable] + list(args)
     subprocess.call(cmd)
 
 init_builtins()

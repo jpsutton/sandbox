@@ -87,6 +87,10 @@ class PyCmdLine (cmd.Cmd):
         options.append(name)
     return options
 
+  def completedefault (self, text, line, begidx, endidx):
+    if line.startswith("/"):
+      return PyCommands.BuiltinCommand.completeFileFolder(None, text, line, begidx, endidx)
+
   # Template method for complete-able builtins (gets copied for each one at runtime)
   def complete_builtin (self, text, line, begidx, endidx):
     try:
@@ -95,6 +99,13 @@ class PyCmdLine (cmd.Cmd):
       return appGlobals.BUILTINS[cmd].complete(text, line, begidx, endidx)
     except:
       Util.logTraceback()
+
+  def default(self, line):
+    if line.startswith("/"):
+      parts = line.split(" ")
+      cmd = PyCommands.OSCommand("__last_command__", parts[0])
+      parsed_args = [self.parseArgument(x) for x in parts[1:]]
+      cmd.run(*tuple(parsed_args))
 
   # Command prompt loop
   def cmdloop(self, intro=None):
@@ -132,13 +143,13 @@ class PyCmdLine (cmd.Cmd):
     try:
       realFuncName = sys._getframe().f_code.co_name
       cmd = realFuncName.split("_")[1]
-      parsed_args = [self.parseArgument(x) for x in list(args)]
+      parsed_args = [self.parseArgument(x) for x in args[0].split(" ")]
 
       # Ignore empty arg lists
       if len(parsed_args) == 1 and parsed_args[0] == "":
-        parsed_args = tuple()
+        parsed_args = []
 
-      appGlobals.BUILTINS[cmd].run(*parsed_args)
+      appGlobals.BUILTINS[cmd].run(*tuple(parsed_args))
     except:
       Util.logTraceback()
 
