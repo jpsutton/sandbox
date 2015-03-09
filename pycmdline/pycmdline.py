@@ -1,6 +1,6 @@
 import os
 import ast
-import cmd
+import cmd2 as cmd
 import sys
 import types
 import getpass
@@ -36,12 +36,13 @@ class PyCmdLine (cmd.Cmd):
 
   # Constructor
   def __init__(self, completekey='tab', stdin=None, stdout=None):
-    cmd.Cmd.__init__(self, completekey, stdin, stdout)
     self.updatePrompt()
 
     for (key, value) in appGlobals.BUILTINS.items():
       self.copyMethod(self.__class__.do_builtin, "do_%s" % key)
       self.copyMethod(self.__class__.complete_builtin, "complete_%s" % key)
+
+    cmd.Cmd.__init__(self, completekey, stdin, stdout)
 
   # Copy an instance method and give it a new name
   def copyMethod(self, orig, new_name):
@@ -75,8 +76,8 @@ class PyCmdLine (cmd.Cmd):
     return setattr(self, new_name, types.MethodType(func, self))
 
   # List of all complete-able commands
-  def completenames (self, text, *ignored):
-    return PyCommands.BuiltinCommand.complete(text, *ignored) + self.complete_pycmd(text, *ignored)
+  #def completenames (self, text, *ignored):
+  #  return PyCommands.BuiltinCommand.complete(text, *ignored) + self.complete_pycmd(text, *ignored)
 
   # List of all complete-able python commands
   def complete_pycmd (self, text, line, begidx, endidx):
@@ -101,20 +102,27 @@ class PyCmdLine (cmd.Cmd):
       Util.logTraceback()
 
   def default(self, line):
-    if line.startswith("/"):
-      parts = line.split(" ")
-      cmd = PyCommands.OSCommand("__last_command__", parts[0])
-      parsed_args = [self.parseArgument(x) for x in parts[1:]]
-      cmd.run(*tuple(parsed_args))
+    try:
+      if line.startswith("/"):
+        parts = line.split(" ")
+        cmd = PyCommands.OSCommand("__last_command__", parts[0])
+        parsed_args = [self.parseArgument(x) for x in parts[1:]]
+        cmd.run(*tuple(parsed_args))
+      else:
+        self.do_py(self.parsed("py %s" % line))
+    except:
+      Util.logTraceback()
 
   # Command prompt loop
-  def cmdloop(self, intro=None):
+  def cmdloop(self):
     while True:
       try:
-        cmd.Cmd.cmdloop(self, intro)
+        super(self.__class__, self).cmdloop()
       except KeyboardInterrupt:
         # Handle Ctrl+C keypress
         self.stdout.write("\n")
+      except:
+        Util.logTraceback()
 
   # Update the prompt string
   def updatePrompt (self):
@@ -150,13 +158,6 @@ class PyCmdLine (cmd.Cmd):
         parsed_args = []
 
       appGlobals.BUILTINS[cmd].run(*tuple(parsed_args))
-    except:
-      Util.logTraceback()
-
-  # Method for running python commands
-  def do_pycmd (self, *args):
-    try:
-      exec(" ".join(args))
     except:
       Util.logTraceback()
 
