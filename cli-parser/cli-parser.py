@@ -8,155 +8,164 @@ import sys
 import shutil
 import os
 import ast
+import inspect
+
+STR_UNDOCUMENTED = "FIXME: UNDOCUMENTED"
 
 # Set this environment variable to help the argparse formatter wrap the lines
 os.environ['COLUMNS'] = str(shutil.get_terminal_size().columns)
 
+
 class MLArgParser:
-  description = "FIXME: UNDESCRIBED APPLICATION"
+    __doc__ = STR_UNDOCUMENTED
 
-  # mapping of command arguments to descriptions
-  argDesc = {
-  }
+    # mapping of command arguments to descriptions
+    argDesc = {
+    }
 
-  cmdList = None
+    cmdList = None
 
-  def __init__ (self, level=1, parent=None, top=None):
-    # Indicate how many command-levels deep we are
-    self.level = level
-    self.parent = parent
-    self.top = top if level > 1 else self
-    
-    # create our top-level parser
-    parser = argparse.ArgumentParser(
-      description=self.description,
-      usage=(("%s " * level) + "<command> [<args>]") % tuple(sys.argv[0:level]),
-      epilog=self.__make_epilog_str__(),
-      formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    
-    parser.add_argument('command', help='Subcommand to run')
+    def __init__(self, level=1, parent=None, top=None):
+        # Indicate how many command-levels deep we are
+        self.level = level
+        self.parent = parent
+        self.top = top if level > 1 else self
 
-    # parse_args defaults to [1:] for args, but you need to exclude the rest of the args too, or validation will fail
-    args = parser.parse_args(sys.argv[level:level + 1])
-    commands = dict()
+        # create our top-level parser
+        parser = argparse.ArgumentParser(
+            description=self.__doc__,
+            usage=(("%s " * level) + "<command> [<args>]") % tuple(sys.argv[0:level]),
+            epilog=self.__get_epilog_str(),
+            formatter_class=argparse.RawDescriptionHelpFormatter
+        )
 
-    # create a mapping of lower-case commands to function names (for case-insensitive comparison)
-    for cmd in self.__command_list__():
-      commands[cmd.lower()] = cmd
+        parser.add_argument('command', help='Subcommand to run')
 
-    # make sure it's a valid command
-    if args.command.startswith("__") or args.command.lower() not in list(commands.keys()):
-      print(('Unrecognized command: %s' % args.command))
-      parser.print_help()
-      exit(1)
+        # parse only the first argument after the current command
+        args = parser.parse_args(sys.argv[level:level + 1])
+        commands = dict()
 
-    # create a parser for the command and parse the arguments for the command
-    command = commands[args.command.lower()]
-    parser = self.__cmd_arg_parser__(command)
-    
-    # if we get None back from __cmd_arg_parser__, then this was a sub-command that was executed already
-    if parser is None:
-      return
-    
-    commandFuncArgs = vars(parser.parse_args(sys.argv[level + 1:]))
+        # create a mapping of lower-case commands to function names (for case-insensitive comparison)
+        for (cmd_name, attr) in self.__get_cmd_list():
+            commands[cmd_name.lower()] = attr
 
-    # Iterate through the args and remove any that weren't specified
-    for key in list(commandFuncArgs.keys()):
-      if commandFuncArgs[key] is None:
-        commandFuncArgs.pop(key)
+        # make sure it's a valid command
+        if args.command.startswith("_") or args.command.lower() not in list(commands.keys()):
+            print(('Unrecognized command: %s' % args.command))
+            parser.print_help()
+            exit(1)
 
-    # use dispatch pattern to invoke method with same name
-    getattr(self, command)(**commandFuncArgs)
+        # create a parser for the command
+        command_callable = commands[args.command.lower()]
+        parser = self.__get_cmd_parser(command_callable)
 
-  def __command_list__ (self):
-    if self.cmdList is None:
-      self.cmdList = [func for func in dir(self) if callable(getattr(self, func)) and not func.startswith("_")]
+        # (1) if we get a parser back from __get_cmd_parser(), then it was a command
+        # (2) otherwise, it's a sub-command that was already handled
+        if parser:
+            # extract a list of args for the command
+            func_args = vars(parser.parse_args(sys.argv[level + 1:]))
 
-    return self.cmdList
+            # iterate through the args and remove any that weren't specified
+            for key in list(func_args.keys()):
+                func_args.pop(key) if func_args[key] is None else None
 
-  def __make_epilog_str__ (self):
-    # start with a header
-    epilog="available commands:\n"
+            # invoke the callable for the command with all provided arguments
+            command_callable(**func_args)
 
-    # retrieve a list of methods in the current class (excluding dunders)
-    func_list = self.__command_list__()
-    #print(func_list)
-    cmd_list = list()
+    def __get_cmd_list(self):
+        if self.cmdList is None:
+            self.cmdList = list()
 
-    # build a list of all commands with descriptions
-    for cmd in func_list:
-      #print("DEBUG: evaluating function %s" % cmd)
-      func = getattr(self, cmd)
+            for attr_name in dir(self):
+                attr = getattr(self, attr_name)
 
-      if func.__class__.__name__ == "method":
-        desc = func.__doc__ if func.__doc__ else "FIXME: UNDOCUMENTED COMMAND"
-        cmd_list.append([func.__name__, desc])
-      elif func.__class__.__name__ == "type":
-        cmd_list.append([cmd, " " + func.description])
+                if callable(attr) and not attr_name.startswith("_"):
+                    self.cmdList.append((attr_name, attr))
 
+        return self.cmdList
 
-    # determine the max width for the commands column
-    col_width = max(len(cmd) for cmd in list([x[0] for x in cmd_list])) + 6
+    def __get_epilog_str(self):
+        # start with a header
+        epilog = "available commands:\n"
 
-    # format each command row
-    for row in cmd_list:
-      epilog += "  %s\n" % "".join(word.ljust(col_width) for word in row)
+        # retrieve a list of methods in the current class (excluding dunders)
+        attr_list = self.__get_cmd_list()
+        cmd_list = list()
 
-    return epilog + " "
+        # build a list of all commands with descriptions
+        for (cmd_name, attr) in attr_list:
+            desc = inspect.getdoc(attr)
 
-  def __cmd_arg_parser__ (self, command):
-    # find the function corresponding to the command, retrieve the arglist with type info (assumes command functions have been properly annotated a la PEP-484)
-    func = getattr(self, command)
-    
-    # Intercept and execute calls to sub-commands
-    if func.__class__.__name__ == "type":
-      func(level=self.level + 1, parent=self, top=self.top)
-      return None
+            if not desc:
+                desc = STR_UNDOCUMENTED
 
-    func_args = func.__annotations__
+            cmd_list.append([cmd_name, desc])
 
-    # calculate the number of required arguments; create a counter for adding them to the parser
-    num_req_args = len(func_args) - (0 if not func.__defaults__ else len(func.__defaults__))
-    
-    # This counter needs to start at -1 to account for the unlisted help flag
-    req_counter = -1
+        # determine the max width for the commands column
+        if len(cmd_list):
+            col_width = max(len(cmd) for cmd in list([x[0] for x in cmd_list])) + 6
 
-    # create a parser for the command
-    level = self.level + 1
-    parser = argparse.ArgumentParser(description=func.__doc__, usage=(("%s " * level) + "[<args>]") % tuple(sys.argv[0:level]))
-    requiredArgsGroup = parser.add_argument_group("required arguments")
+            # format each command row
+            for row in cmd_list:
+                epilog += "  %s\n" % "".join(word.ljust(col_width) for word in row)
 
-    # This is a list of types that can be safely converted from string by the ast.literal_eval method
-    ast_types = [ list, tuple, dict, set ]
+        return epilog + " "
 
-    # populate the parser with the arg and type information from the function (converting underscores to dashes)
-    for arg in list(func_args.keys()):
-      # underscores in argument names are uncool, so replace them with dashes
-      cli_name = "--%s" % arg.replace("_", "-")
-      
-      # We can determine if *this* arg is required based on it's position in the list
-      arg_required = req_counter < num_req_args
+    def __get_cmd_parser(self, command_callable):
+        # (1) find the function corresponding to the command
+        # (2) retrieve the arg list with type info (assumes command functions have been properly annotated a la PEP-484)
+        bool_class = True.__class__
 
-      # set a default description if one isn't defined
-      cli_desc = self.argDesc[arg] if arg in list(self.argDesc.keys()) else "FIXME: NO DESCRIPTION"
+        # Intercept and execute calls to sub-commands
+        if command_callable.__class__.__name__ == "type":
+            command_callable(level=self.level + 1, parent=self, top=self.top)
+            return None
 
-      # determine if we're dealing with a boolean argument
-      if func_args[arg] == True.__class__:
-        # Boolean arguments are considered flags, and are assumed False if not provided, and True if provided
-        parser.add_argument(cli_name, help=cli_desc, required=False, action='store_true')
-      else:
-        # determine which group to place an argument in based on whether or not it's required
-        grp = requiredArgsGroup if arg_required else parser
+        func_args = command_callable.__annotations__
 
-        # determine if we need to use the ast module to parse the value
-        arg_type = ast.literal_eval if func_args[arg] in ast_types else func_args[arg]
-        
-        # add the argument to the appropriate group
-        grp.add_argument(cli_name, help=cli_desc, type=arg_type, required=arg_required)
-        
-      req_counter += 1
+        # (1) calculate the number of required arguments
+        # (2) create a counter for adding them to the parser
+        num_req_args = len(func_args) - (0 if not command_callable.__defaults__ else len(command_callable.__defaults__))
+        arg_idx = 0
 
-    return parser
+        # Offset the level from the one passed to the constructor (to skip parsing the previous command)
+        level = self.level + 1
+
+        # create a parser for the command and a group to track required args
+        usage_str = (("%s " * level) + "[<args>]") % tuple(sys.argv[0:level])
+        parser = argparse.ArgumentParser(description=command_callable.__doc__, usage=usage_str)
+        req_args_grp = parser.add_argument_group("required arguments")
+
+        # This is a list of types that can be safely converted from string by the ast.literal_eval method
+        ast_types = [list, tuple, dict, set]
+
+        # populate the parser with the arg and type information from the function
+        for arg in list(func_args.keys()):
+            # underscores in argument names are uncool, so replace them with dashes
+            cli_name = "--%s" % arg.replace("_", "-")
+
+            # We can determine if *this* arg is required based on it's position in the list
+            arg_required = arg_idx < num_req_args
+
+            # set a default description if one isn't defined
+            cli_desc = self.argDesc[arg] if arg in list(self.argDesc.keys()) else STR_UNDOCUMENTED
+
+            # determine if we're dealing with a boolean argument
+            if func_args[arg] == bool_class:
+                # Boolean arguments are considered flags, and are assumed False if not provided, and True if provided
+                parser.add_argument(cli_name, help=cli_desc, required=False, action='store_true')
+            else:
+                # determine which group to place an argument in based on whether or not it's required
+                grp = req_args_grp if arg_required else parser
+
+                # determine if we need to use the ast module to parse the value
+                arg_type = ast.literal_eval if func_args[arg] in ast_types else func_args[arg]
+
+                # add the argument to the appropriate group
+                grp.add_argument(cli_name, help=cli_desc, type=arg_type, required=arg_required)
+
+            arg_idx += 1
+
+        return parser
 
 
