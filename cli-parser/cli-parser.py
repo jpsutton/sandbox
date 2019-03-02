@@ -23,7 +23,8 @@ class MLArgParser:
     argDesc = {
     }
 
-    cmdList = None
+    cmd_list = None
+    short_options = None
 
     def __init__(self, level=1, parent=None, top=None):
         # Indicate how many command-levels deep we are
@@ -39,7 +40,7 @@ class MLArgParser:
             formatter_class=argparse.RawDescriptionHelpFormatter
         )
 
-        parser.add_argument('command', help='Subcommand to run')
+        parser.add_argument('command', help='Sub-command to run')
 
         # parse only the first argument after the current command
         args = parser.parse_args(sys.argv[level:level + 1])
@@ -57,32 +58,36 @@ class MLArgParser:
 
         # create a parser for the command
         command_callable = commands[args.command.lower()]
+
+        # Intercept and execute calls to sub-commands
+        if isinstance(command_callable, type):
+            command_callable(level=self.level + 1, parent=self, top=self.top)
+            return
+
+        # get a parser object for the command function
         parser = self.__get_cmd_parser(command_callable)
 
-        # (1) if we get a parser back from __get_cmd_parser(), then it was a command
-        # (2) otherwise, it's a sub-command that was already handled
-        if parser:
-            # extract a list of args for the command
-            func_args = vars(parser.parse_args(sys.argv[level + 1:]))
+        # extract a list of args for the command
+        func_args = vars(parser.parse_args(sys.argv[level + 1:]))
 
-            # iterate through the args and remove any that weren't specified
-            for key in list(func_args.keys()):
-                func_args.pop(key) if func_args[key] is None else None
+        # iterate through the args and remove any that weren't specified
+        for key in list(func_args.keys()):
+            func_args.pop(key) if func_args[key] is None else None
 
-            # invoke the callable for the command with all provided arguments
-            command_callable(**func_args)
+        # invoke the callable for the command with all provided arguments
+        command_callable(**func_args)
 
     def __get_cmd_list(self):
-        if self.cmdList is None:
-            self.cmdList = list()
+        if self.cmd_list is None:
+            self.cmd_list = list()
 
             for attr_name in dir(self):
                 attr = getattr(self, attr_name)
 
                 if callable(attr) and not attr_name.startswith("_"):
-                    self.cmdList.append((attr_name, attr))
+                    self.cmd_list.append((attr_name, attr))
 
-        return self.cmdList
+        return self.cmd_list
 
     def __get_epilog_str(self):
         # start with a header
@@ -111,22 +116,28 @@ class MLArgParser:
 
         return epilog + " "
 
+    def __get_options_for_arg(self, arg):
+        # initialize short options tracker
+        if not self.short_options:
+            self.short_options = list()
+
+        # underscores in argument names are uncool, so replace them with dashes
+        long_option = "--%s" % arg.replace("_", "-")
+
+        # try to define a short option if it's not already used
+        if arg[0] not in self.short_options:
+            short_option = "-%s" % arg[0]
+            self.short_options.append(short_option)
+            return long_option, short_option
+        else:
+            return long_option,
+
     def __get_cmd_parser(self, command_callable):
-        # (1) find the function corresponding to the command
-        # (2) retrieve the arg list with type info (assumes command functions have been properly annotated a la PEP-484)
-        bool_class = True.__class__
-
-        # Intercept and execute calls to sub-commands
-        if command_callable.__class__.__name__ == "type":
-            command_callable(level=self.level + 1, parent=self, top=self.top)
-            return None
-
+        # retrieve the arg list with type info (assumes command functions have been properly annotated a la PEP-484)
         func_args = command_callable.__annotations__
 
-        # (1) calculate the number of required arguments
-        # (2) create a counter for adding them to the parser
+        # calculate the number of required arguments
         num_req_args = len(func_args) - (0 if not command_callable.__defaults__ else len(command_callable.__defaults__))
-        arg_idx = 0
 
         # Offset the level from the one passed to the constructor (to skip parsing the previous command)
         level = self.level + 1
@@ -136,36 +147,42 @@ class MLArgParser:
         parser = argparse.ArgumentParser(description=command_callable.__doc__, usage=usage_str)
         req_args_grp = parser.add_argument_group("required arguments")
 
-        # This is a list of types that can be safely converted from string by the ast.literal_eval method
+        # list of types that can be safely converted from string by the ast.literal_eval method
         ast_types = [list, tuple, dict, set]
 
         # populate the parser with the arg and type information from the function
-        for arg in list(func_args.keys()):
-            # underscores in argument names are uncool, so replace them with dashes
-            cli_name = "--%s" % arg.replace("_", "-")
+        for (arg_idx, arg) in enumerate(func_args.keys()):
+            # determine the long and/or short option names for the argument
+            options = self.__get_options_for_arg(arg)
 
             # We can determine if *this* arg is required based on it's position in the list
             arg_required = arg_idx < num_req_args
 
             # set a default description if one isn't defined
-            cli_desc = self.argDesc[arg] if arg in list(self.argDesc.keys()) else STR_UNDOCUMENTED
+            cli_desc = self.argDesc[arg] if arg in self.argDesc else STR_UNDOCUMENTED
 
             # determine if we're dealing with a boolean argument
-            if func_args[arg] == bool_class:
+            if func_args[arg] == bool:
                 # Boolean arguments are considered flags, and are assumed False if not provided, and True if provided
-                parser.add_argument(cli_name, help=cli_desc, required=False, action='store_true')
+                parser.add_argument(*options, help=cli_desc, required=False, action='store_true', dest=arg)
             else:
                 # determine which group to place an argument in based on whether or not it's required
-                grp = req_args_grp if arg_required else parser
+                grp =            # underscores in argument names are uncool, so replace them with dashes
+            long_option = "--%s" % arg.replace("_", "-")
+
+            # try to define a short option if it's not already used
+            if arg[0] not in short_options:
+                short_option = "-%s" % arg[0]
+                short_options.append(short_option)
+                options = (long_option, short_option)
+            else:
+                options = (long_option, ) req_args_grp if arg_required else parser
 
                 # determine if we need to use the ast module to parse the value
                 arg_type = ast.literal_eval if func_args[arg] in ast_types else func_args[arg]
 
                 # add the argument to the appropriate group
-                grp.add_argument(cli_name, help=cli_desc, type=arg_type, required=arg_required)
-
-            arg_idx += 1
+                grp.add_argument(*options, help=cli_desc, type=arg_type, required=arg_required, dest=arg)
 
         return parser
-
 
