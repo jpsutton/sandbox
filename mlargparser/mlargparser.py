@@ -47,7 +47,7 @@ class MLArgParser:
 
         # create our top-level parser
         self.parser = argparse.ArgumentParser(
-            description=self.__doc__,
+            description=inspect.getdoc(self),
             usage=(("%s " * level) + "<command> [<args>]") % tuple(sys.argv[0:level]),
             epilog=self.__get_epilog_str(),
             formatter_class=argparse.RawDescriptionHelpFormatter
@@ -161,7 +161,7 @@ class MLArgParser:
 
         # create a parser for the command and a group to track required args
         usage_str = (("%s " * level) + "[<args>]") % tuple(sys.argv[0:level])
-        parser = argparse.ArgumentParser(description=command_callable.__doc__, usage=usage_str)
+        parser = argparse.ArgumentParser(description=inspect.getdoc(command_callable), usage=usage_str)
         req_args_grp = parser.add_argument_group("required arguments")
 
         # populate the parser with the arg and type information from the function

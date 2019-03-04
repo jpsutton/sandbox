@@ -15,7 +15,7 @@ Example
 from mlargparser import MLArgParser
 
 class MyApp (MLArgParser):
-  __doc__ = "My Amazing App"
+  """ My Amazing App """
   
   argDesc = {
     'arg1': 'arg1 description here',
@@ -70,6 +70,13 @@ required arguments:
 
 ```
 
+Calling the application with the correct parameters is as you would expect:
+
+```
+[user@localhost]: ~>$ ./myprog.py command1 --arg1 0 --arg2 testing123
+arg2 = testing123
+arg3 = default value
+```
 
 
 Licensing
